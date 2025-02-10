@@ -12,7 +12,7 @@ public class MemoReader : IDisposable
 {
     private BinaryReader br;
     private Ptr top;  // position for next item to write
-    private MemoReader any_offset_reader;
+    private MemoReader? any_offset_reader;
 
     public MemoReader(BinaryReader br)
     {
@@ -154,7 +154,7 @@ public class MemoReader : IDisposable
 
 #region Decorated value
 
-    public object ReadTagged()
+    public object? ReadTagged()
     {
         byte typ = ReadByte();
         while (typ == '\0')
@@ -197,8 +197,8 @@ public class MemoReader : IDisposable
         if (valType != MemoPack.TYPE_UNTYPED)
             throw new Exception($"Unhandled value type {valType}  / '{(char)valType}'");
 
-        string[] keys = ReadUInt32Array(n).Select(offset => AtOffset(offset).ReadString()).ToArray();
-        object[] vals = ReadUInt32Array(n).Select(offset => AtOffset(offset).ReadTagged()).ToArray();
+        string[]  keys = ReadUInt32Array(n).Select(offset => AtOffset(offset).ReadString()).ToArray();
+        object?[] vals = ReadUInt32Array(n).Select(offset => AtOffset(offset).ReadTagged()).ToArray();
 
         return keys.Zip(vals, (k, v) => new { k, v })
               .ToDictionary(kv => kv.k, kv => kv.v);

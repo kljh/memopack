@@ -9,9 +9,9 @@ public class MemoScan : IDisposable
 {
     private readonly string type_field_name;
     private int object_count = 0;
-    private HashSet<string> pointer_tags; // YAML allows pointer with document
+    private HashSet<string>? pointer_tags; // YAML allows pointer with document
 
-    public MemoScan(string type_field_name, HashSet<string> pointer_tags = null)
+    public MemoScan(string type_field_name, HashSet<string>? pointer_tags = null)
     {
         this.type_field_name = type_field_name;
         this.pointer_tags = pointer_tags;
@@ -32,12 +32,12 @@ public class MemoScan : IDisposable
     {
         public int UseCount;
 
-        // Hopefully, that's a singleton 
+        // Hopefully, that's a singleton
         public Dictionary<string, int> UsedTypes = new();
-        
-        // For string, arrays, and dictionary, we report the max size 
+
+        // For string, arrays, and dictionary, we report the max size
         public double MaxValue;
-        
+
         // Are string used as enum ?
         public Dictionary<string, int> UsedValues = new();
 
@@ -49,11 +49,11 @@ public class MemoScan : IDisposable
     public void RunScan(object data)
     {
         if (data is JObject)
-            RunScanJObject(data as JObject);
-        
+            RunScanJObject((JObject)data);
+
         if (data is JArray)
-            RunScanJArray(data as JArray);
-        
+            RunScanJArray((JArray)data);
+
 
         /*
         if (val is string)
@@ -72,18 +72,21 @@ public class MemoScan : IDisposable
     public void RunScanJObject(JObject jsonObj)
     {
         object_count++;
-        
-        TypeStats typeStats = GetTypeStats(jsonObj);
-        typeStats.UseCount++;
-        
-        var dict = jsonObj.ToObject<Dictionary<string, object>>();        
+
+        TypeStats? typeStats = GetTypeStats(jsonObj);
+        if (typeStats != null)
+            typeStats.UseCount++;
+
+        var dict = jsonObj.ToObject<Dictionary<string, object>>();
+        if (dict == null)
+            throw new ArgumentNullException();
         foreach (var kv in dict)
         {
             string att = kv.Key;
             object val = kv.Value;
             RunScan(val);
 
-            if (typeStats != null) 
+            if (typeStats != null)
             {
                 if (!typeStats.Attributes.ContainsKey(att))
                     typeStats.Attributes[att] = new();
@@ -102,36 +105,39 @@ public class MemoScan : IDisposable
 
                 if (val is string)
                 {
-                    var valStr = val as string;
+                    var valStr = (string)val;
 
                     if (!attrStats.UsedValues.ContainsKey(valStr))
                         attrStats.UsedValues[valStr] = 0;
                     attrStats.UsedValues[valStr]++;
-                
+
                     attrStats.IsPtr = attrStats.IsPtr ||
-                        ( pointer_tags?.Contains(valStr) ?? false ); 
+                        ( pointer_tags?.Contains(valStr) ?? false );
                 }
             }
         }
-    }    
+    }
 
-    private TypeStats GetTypeStats(JObject jsonObj)
+    private TypeStats? GetTypeStats(JObject jsonObj)
     {
         if (!jsonObj.ContainsKey(type_field_name))
             return null;
 
-        string type_name = jsonObj[type_field_name].ToString();
+        string? type_name = jsonObj[type_field_name]?.ToString();
+
+        if (type_name == null)
+            return null;
 
         if (!Types.ContainsKey(type_name))
             Types[type_name] = new ();
-        
+
         return Types[type_name];
     }
 
     static private double GetNumValue(object val)
     {
         if (val is string)
-            return (val as string).Length;
+            return ((string)val).Length;
         if (val is double)
             return (double)val;
         if (val is long)
@@ -144,10 +150,13 @@ public class MemoScan : IDisposable
             return (uint)val;
         return 0.0;
     }
-    
+
     private void RunScanJArray(JArray jsonArray)
     {
-        object[] vec = jsonArray.ToObject<object[]>();
+        object[]? vec = jsonArray.ToObject<object[]>();
+        if (vec == null)
+            throw new ArgumentNullException();
+
         foreach (var val in vec)
             RunScan(val);
     }
@@ -170,7 +179,7 @@ public class MemoScan : IDisposable
                     .OrderBy(kv => -kv.Value)
                     .Select(kv => kv.Key));
 
-                string usedValue = $"#{attrStats.UsedValues.Count()}" + 
+                string usedValue = $"#{attrStats.UsedValues.Count()}" +
                     string.Join(",", attrStats.UsedTypes
                         .OrderBy(kv => -kv.Value)
                         .Take(12)

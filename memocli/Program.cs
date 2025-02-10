@@ -56,7 +56,7 @@ namespace MemoCLI
             rootCmd.SetHandler((inputPath, rw, outputPath, outputFormat, extra_pack, test) => {
                 Console.WriteLine("Hello memopack!");
 
-                object data = null;
+                object? data = null;
                 if (!string.IsNullOrEmpty(inputPath) && inputPath != "-") {
                     if (inputPath.StartsWith("~"))
                         inputPath = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
@@ -109,7 +109,9 @@ namespace MemoCLI
         {
             string type_name_field = "type";
             var dataJson = " { \"type\": \"abc\", \"int\": 123, \"txt\": 4.56, \"flag0\": false, \"flag1\": true, \"lst\": [ 1, true, \"love\" ]} ";
-            object data = FromJson(dataJson);
+            object? data = FromJson(dataJson);
+            if (data == null)
+                throw new NullReferenceException("Null from JSON deserialisation");
             var scanner = new MemoScan(type_name_field);
             scanner.RunScan(data);
             scanner.DisplayScan();
@@ -181,21 +183,28 @@ namespace MemoCLI
             }
         }
 
-        static void CheckMemo<T>(T val, bool extra_pack = extra_pack_default)
+        static void CheckMemo<T>(T? val, bool extra_pack = extra_pack_default)
         {
             byte[] bytes = ToMemo(val, extra_pack);
-            T res = FromMemo<T>(bytes);
-            if (!val.Equals(res))
+            T? res = FromMemo<T>(bytes);
+            if (val == null)
+            {
+                if (res != null)
+                    throw new Exception($"CheckMemo diff {res} <> {val} ");
+            }
+            else if (!val.Equals(res))
+            {
                 throw new Exception($"CheckMemo diff {res} <> {val} ");
+            }
         }
 
         static int CheckMemoOnJson(string dataJson, bool extra_pack = extra_pack_default)
         {
-            object data = FromJson(dataJson);
+            object? data = FromJson(dataJson);
             string refJson = ToJson(data);
 
             byte[] bytes = ToMemo(data, extra_pack);
-            object res = FromMemo<object>(bytes);
+            object? res = FromMemo<object>(bytes);
             string resJson = ToJson(res);
 
             if (!refJson.Equals(resJson))
@@ -213,7 +222,7 @@ namespace MemoCLI
                 throw new Exception($"CheckMemo compress {resSize} !< {refSize} ");
         }
 
-        static byte[] ToMemo(object val, bool allow_object_internalisation)
+        static byte[] ToMemo(object? val, bool allow_object_internalisation)
         {
             using (MemoryStream ms = new MemoryStream())
             using (BinaryWriter bw = new BinaryWriter(ms))
@@ -224,7 +233,7 @@ namespace MemoCLI
             }
         }
 
-        static void ToMemoFile(string outputPath, object val, bool allow_object_internalisation)
+        static void ToMemoFile(string outputPath, object? val, bool allow_object_internalisation)
         {
             using (FileStream fs = new FileStream(outputPath, FileMode.Create))
             using (BinaryWriter bw = new BinaryWriter(fs))
@@ -234,29 +243,29 @@ namespace MemoCLI
             }
         }
 
-        static T FromMemo<T>(byte[] bytes)
+        static T? FromMemo<T>(byte[] bytes)
         {
             using (MemoryStream ms = new MemoryStream(bytes))
             using (BinaryReader br = new BinaryReader(ms))
             using (MemoReader mr = new MemoReader(br))
             {
                 var res = mr.ReadTagged();
-                return (T)res;
+                return (T?)res;
             }
         }
 
-        static T FromMemoFile<T>(string inputPath)
+        static T? FromMemoFile<T>(string inputPath)
         {
             using (FileStream fs = new FileStream(inputPath, FileMode.Open))
             using (BinaryReader br = new BinaryReader(fs))
             using (MemoReader mr = new MemoReader(br))
             {
                 var res = mr.ReadTagged();
-                return (T)res;
+                return (T?)res;
             }
         }
 
-        static string ToJson(object val)
+        static string ToJson(object? val)
         {
             // JsonSerializer serializer = new JsonSerializer();
             // serializer.Formatting = Formatting.Indented;
@@ -273,7 +282,7 @@ namespace MemoCLI
             return JsonConvert.SerializeObject(val);
         }
 
-        static void ToJsonFile(string jsonPath, object val)
+        static void ToJsonFile(string jsonPath, object? val)
         {
             JsonSerializer serializer = new JsonSerializer();
             serializer.Formatting = Formatting.Indented;
@@ -286,12 +295,12 @@ namespace MemoCLI
         }
 
         // Dictionary<string, object>
-        static object FromJson(string json)
+        static object? FromJson(string json)
         {
             return JsonConvert.DeserializeObject<object>(json);
         }
 
-        static object FromJsonFile(string jsonPath)
+        static object? FromJsonFile(string jsonPath)
         {
             JsonSerializer serializer = new JsonSerializer();
             using (StreamReader sr = File.OpenText(jsonPath))
@@ -302,7 +311,7 @@ namespace MemoCLI
         }
 
 
-        static object FromMsgPackFile(string inputPath)
+        static object? FromMsgPackFile(string inputPath)
         {
             using (FileStream fs = new FileStream(inputPath, FileMode.Open))
             using (BinaryReader br = new BinaryReader(fs))
@@ -322,7 +331,7 @@ namespace MemoCLI
             }
         }
 
-        static object FromFile(string inputPath)
+        static object? FromFile(string inputPath)
         {
             var ext = Path.GetExtension(inputPath).ToLower();
             if (ext == ".json")

@@ -15,28 +15,35 @@ public class MemoWriter : IDisposable
     private Ptr top;  // position for next item to write
     private Ptr start, stop = 0;
 
-    private Dictionary<string, MemoPtr> interned_strings;
-    private Dictionary<byte[], MemoPtr> interned_objects;
+    public class MemoWriterInternals
+    {
+        public MemoWriterInternals(bool allow_object_internalisation) {
+            this.interned_strings = new();
+            if (allow_object_internalisation)
+                this.interned_objects = new ();
+        }
+
+        public  Dictionary<string, MemoPtr> interned_strings;
+        public  Dictionary<byte[], MemoPtr>? interned_objects;
+    }
+
+    private MemoWriterInternals internals;
 
     public MemoWriter(BinaryWriter bw, bool allow_object_internalisation)
     {
         this.bw = bw;
-        this.interned_strings = new();
-
-        if (allow_object_internalisation)
-           this.interned_objects = new ();
+        this.internals = new MemoWriterInternals(allow_object_internalisation);
     }
 
     public MemoWriter(BinaryWriter bw, Ptr startPos, Ptr stopPos,
-        Dictionary<string, MemoPtr> interned_strings,
-        Dictionary<byte[], MemoPtr> interned_objects
+        MemoWriterInternals internals
         )
     {
         this.bw = bw;
         this.top = startPos;
         this.start = startPos;
         this.stop = stopPos;
-        this.interned_strings = interned_strings;
+        this.internals = internals;
     }
 
     public void Dispose()
@@ -49,7 +56,7 @@ public class MemoWriter : IDisposable
     {
         Ptr startPos = this.top;
         Ptr stopPos = this.top + scopeSize;
-        var boundWriter = new MemoWriter(bw, startPos, stopPos, interned_strings, interned_objects);
+        var boundWriter = new MemoWriter(bw, startPos, stopPos, internals);
 
         // update top
         this.top = this.top + scopeSize;
@@ -155,11 +162,11 @@ public class MemoWriter : IDisposable
     public MemoPtr Write(string val)
     {
         // string internalisation optimisation
-        if (interned_strings.ContainsKey(val))
-            return interned_strings[val];
+        if (internals.interned_strings.ContainsKey(val))
+            return internals.interned_strings[val];
 
         var pos = Align(sizeof(MemoPtr));
-        interned_strings[val] = pos;
+        internals.interned_strings[val] = pos;
 
         var bytes = Encoding.UTF8.GetBytes(val);
         int n = bytes.Length;
@@ -224,8 +231,11 @@ public class MemoWriter : IDisposable
 
 #region Decorated value
 
-    public MemoPtr WriteTagged(object val)
+    public MemoPtr WriteTagged(object? val)
     {
+        if (val is null)
+            return WriteTaggedNull();
+
         if (val is Dictionary<string, object>)
             return WriteTagged((Dictionary<string, object>)val);
 
@@ -252,17 +262,18 @@ public class MemoWriter : IDisposable
             return WriteTagged((bool[])val);
 
         if (val is JObject) {
-            var val2 = (val as JObject).ToObject<Dictionary<string, object>>();
-            return WriteTagged(val2);
+            var obj = ((JObject)val).ToObject<Dictionary<string, object>>();
+            if (obj == null)
+                throw new NullReferenceException();
+            return WriteTagged(obj);
         }
 
         if (val is JArray) {
-            var val2 = (val as JArray).ToObject<object[]>();
-            return WriteTagged(val2);
+            var vec = ((JArray)val).ToObject<object[]>();
+            if (vec == null)
+                throw new NullReferenceException();
+            return WriteTagged(vec);
         }
-
-        if (val is null)
-            return WriteTaggedNull();
 
         throw new Exception($"Unhandled type {val.GetType().Name}");
     }
@@ -379,8 +390,8 @@ public class MemoWriter : IDisposable
         var pos = Align(sizeof(MemoPtr), sizeof(byte));
 
         // string internalisation optimisation
-        if (interned_strings.ContainsKey(val)) {
-            MemoPtr strAddr = interned_strings[val];
+        if (internals.interned_strings.ContainsKey(val)) {
+            MemoPtr strAddr = internals.interned_strings[val];
 
             Write(MemoPack.TYPE_TXT_PTR);
             Write(strAddr);
