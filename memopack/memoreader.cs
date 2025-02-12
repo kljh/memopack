@@ -69,6 +69,11 @@ public class MemoReader : IDisposable
 
     */
 
+    public string ReadStringAt(MemoPtr ptr)
+    {
+        return AtOffset(ptr).ReadString();
+    }
+
     public string ReadString()
     {
         Align(sizeof(MemoPtr));
@@ -138,6 +143,42 @@ public class MemoReader : IDisposable
     }
 
 
+    public double[] ReadDoubleArray(uint n)
+    {
+        Align(sizeof(double));
+
+        double[] res = new double[n];
+        for (var i=0; i<n; i++)
+            res[i] = br.ReadDouble();
+
+        top += n * sizeof(double);
+        return res;
+    }
+
+    public long[] ReadInt64Array(uint n)
+    {
+        Align(sizeof(long));
+
+        long[] res = new long[n];
+        for (var i=0; i<n; i++)
+            res[i] = br.ReadInt64();
+
+        top += n * sizeof(long);
+        return res;
+    }
+
+    public int[] ReadInt32Array(uint n)
+    {
+        Align(sizeof(int));
+
+        int[] res = new int[n];
+        for (var i=0; i<n; i++)
+            res[i] = br.ReadInt32();
+
+        top += n * sizeof(int);
+        return res;
+    }
+
     public uint[] ReadUInt32Array(uint n)
     {
         Align(sizeof(uint));
@@ -154,6 +195,63 @@ public class MemoReader : IDisposable
 
 #region Decorated value
 
+    public object? ReadTaggedAt(MemoPtr ptr)
+    {
+        if (ptr == 0)
+            return null;
+
+        var res = ReadInlineTagged(ptr);
+        if (res != null)
+            return res;  // value was inlined
+
+        return AtOffset(ptr).ReadTagged();
+    }
+
+    public object? ReadInlineTagged(MemoPtr ptr)
+    {
+        // Tagged value inlined in Ptr are marked with 0xF higher quartet.");
+        if ((ptr & 0xF0000000) == 0)
+            return null;
+
+        uint typ = (ptr >> 24) & 0xF;
+        uint val = ptr & 0xFFFFFF;
+
+        var intFrom24bit = (uint ui) => {
+            if ((ui & 0x800000) == 0) {
+                // positive int (prepend with 0x0)
+                return (int)( 0x00FFFFFF & ui );
+            } else {
+                // negative int (prepend with 0xF)
+                return (int)( 0xFF000000 | ui );
+            }
+        };
+
+        switch (typ) {
+            case 0x8:
+            {
+                if (val == 0)
+                    return string.Empty;
+                else
+                    return new string((char)val, 1);
+            }
+
+            case 0x9:
+                return (double)intFrom24bit(val);
+            case 0xA:
+                return (float)intFrom24bit(val);
+            case 0xB:
+                return (long)intFrom24bit(val);
+            case 0xC:
+                return (int)intFrom24bit(val);
+            case 0xD:
+                return (ulong)val;
+            case 0xE:
+                return (uint)val;
+        }
+
+        return null;
+    }
+
     public object? ReadTagged()
     {
         byte typ = ReadByte();
@@ -161,7 +259,7 @@ public class MemoReader : IDisposable
             typ = ReadByte();
 
         if (typ == MemoPack.TYPE_TXT_PTR)
-            return AtOffset(ReadUInt32()).ReadString();
+            return ReadStringAt(ReadUInt32());
 
         if (typ == MemoPack.TYPE_TXT)
             return ReadString();
@@ -197,8 +295,8 @@ public class MemoReader : IDisposable
         if (valType != MemoPack.TYPE_UNTYPED)
             throw new Exception($"Unhandled value type {valType}  / '{(char)valType}'");
 
-        string[]  keys = ReadUInt32Array(n).Select(offset => AtOffset(offset).ReadString()).ToArray();
-        object?[] vals = ReadUInt32Array(n).Select(offset => AtOffset(offset).ReadTagged()).ToArray();
+        string[]  keys = ReadUInt32Array(n).Select(offset => ReadStringAt(offset)).ToArray();
+        object?[] vals = ReadUInt32Array(n).Select(offset => ReadTaggedAt(offset)).ToArray();
 
         return keys.Zip(vals, (k, v) => new { k, v })
               .ToDictionary(kv => kv.k, kv => kv.v);
@@ -210,15 +308,15 @@ public class MemoReader : IDisposable
         MemoPtr n = ReadUInt32();
 
         if (typ == MemoPack.TYPE_UNTYPED)
-            return ReadUInt32Array(n).Select(offset => AtOffset(offset).ReadTagged()).ToArray();
+            return ReadUInt32Array(n).Select(offset => ReadTaggedAt(offset)).ToArray();
         if (typ == MemoPack.TYPE_TXT)
-            return ReadUInt32Array(n).Select(offset => AtOffset(offset).ReadString()).ToArray();
-        // if (typ == MemoPack.TYPE_F64)
-        //    return ReadDoubleArray();
-        // if (typ == MemoPack.TYPE_I64)
-        //    return ReadInt64Array();
-        // if (typ == MemoPack.TYPE_I32)
-        //    return ReadInt32Array();
+            return ReadUInt32Array(n).Select(offset => ReadStringAt(offset)).ToArray();
+        if (typ == MemoPack.TYPE_F64)
+            return ReadDoubleArray(n);
+        if (typ == MemoPack.TYPE_I64)
+            return ReadInt64Array(n);
+        if (typ == MemoPack.TYPE_I32)
+            return ReadInt32Array(n);
 
         throw new Exception($"Unhandled array type {typ} / '{(char)typ}'");
     }

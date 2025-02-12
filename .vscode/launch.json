@@ -7,7 +7,7 @@
             "request": "launch",
             "preLaunchTask": "build",
             "program": "${workspaceFolder}/memocli/bin/Debug/net8.0/memocli.dll",
-            "args": [ "~/Downloads/isbn-open-data/open4goods-isbn-dataset-small.mempack", "-f", "msgpack" ],
+            "args": [ "~/Downloads/isbn-open-data/open4goods-isbn-dataset-small.mempack", "-f", "msgpack", "--test" ],
             "cwd": "${workspaceFolder}",
             // For more information about the 'console' field, see https://aka.ms/VSCode-CS-LaunchJson-Console
             "console": "internalConsole",

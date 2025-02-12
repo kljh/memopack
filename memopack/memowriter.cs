@@ -231,6 +231,85 @@ public class MemoWriter : IDisposable
 
 #region Decorated value
 
+    public MemoPtr WriteInlineTagged(object? val)
+    {
+        // When we write a pointer to a tagged value, footprint can be as big as :
+        // pointer (4 bytes) tag value (1 type byte + 8 bytes for a double + possibly 7 byte to align)
+        // for a double value as common as zero
+
+        // Inlining means we can encode in the address the most common values.
+        // We set the highest quartet of the address to 0xF to denote inline values (we lose 4GB/16 = 250MB of addressable space).
+        // (Reminder : because we are using little endian integers, the highest quartet is on the 4th byte.)
+        // We use the lowest quartet of the highest byte to encode what the inline value is :
+        //
+        //  0xF8    str     (on 3 bytes: one or two chars, null terminated)
+        //  0xF9    f64     (if contains an int, that can be encode on a 3 byte int)
+        //  0XFA    f32     (idem)
+        //  0xFB    int64   (if can be encoded on a 3 bytes int)
+        //  0xFC    int32   (idem)
+        //  0xFD    uint32  (if can be encoded on a 3 bytes uint)
+        //  0xFE    uint64  (idem)
+        //  0xFF    all tagged value types that fit on 3 bytes : type tag first byte (lowest byte), value in 2nd and 3rd byte
+
+        if (val is null)
+            return (MemoPtr)0;
+
+
+        MemoPtr uiVal = 0;
+        if (val is string)
+        {
+            string sVal = (string)val;
+            if (sVal.Length == 0)
+                return 0xF8000000;
+            if (sVal.Length == 1)
+                return 0xF8000000 | sVal[0];
+        }
+
+        if (val is double)
+        {
+            uiVal = (MemoPtr)((int)(double)val) & 0xFFFFFF;
+            if ((double)val == (double)uiVal)
+                return 0xF9000000 | uiVal;
+        }
+
+        if (val is float)
+        {
+            uiVal = (MemoPtr)((int)(float)val) & 0xFFFFFF;
+            if ((float)val == (float)uiVal)
+                return 0xFA000000 | uiVal;
+        }
+
+        if (val is long)
+        {
+            uiVal = (MemoPtr)((long)val) & 0xFFFFFF;
+            if ((long)val == (long)uiVal)
+                return 0xFB000000 | uiVal;
+        }
+
+        if (val is int)
+        {
+            uiVal = (MemoPtr)((int)val) & 0xFFFFFF;
+            if ((int)val == (int)uiVal)
+                return 0xFC000000 | uiVal;
+        }
+
+        if (val is ulong)
+        {
+            uiVal = (MemoPtr)((ulong)val) & 0xFFFFFF;
+            if ((ulong)val == (ulong)uiVal)
+                return 0xFD000000 | uiVal;
+        }
+
+        if (val is uint)
+        {
+            uiVal = (MemoPtr)((uint)val) & 0xFFFFFF;
+            if ((uint)val == (uint)uiVal)
+                return 0xFE000000 | uiVal;
+        }
+
+        return WriteTagged(val);
+    }
+
     public MemoPtr WriteTagged(object? val)
     {
         if (val is null)
@@ -260,6 +339,22 @@ public class MemoWriter : IDisposable
             return WriteTagged((int[])val);
         if (val is bool[])
             return WriteTagged((bool[])val);
+
+        if (val is Dictionary<string, object>) {
+            var dic = (Dictionary<string, object>)val;
+            return WriteTagged(dic);
+        }
+
+        if (val is Dictionary<object, object>) {
+            var kvs = (Dictionary<object, object>)val;
+            var dic = new Dictionary<string, object>(kvs.Select(kv => new KeyValuePair<string, object>(kv.Key?.ToString() ?? "", kv.Value)));
+            return WriteTagged(dic);
+        }
+
+        if (val is object[]) {
+            var vec = (object[])val;
+            return WriteTagged(vec);
+        }
 
         if (val is JObject) {
             var obj = ((JObject)val).ToObject<Dictionary<string, object>>();
@@ -300,7 +395,7 @@ public class MemoWriter : IDisposable
             foreach (var kv in dict)
                 x.Write(Write(kv.Key));           // write offset to string written offline
             foreach (var kv in dict)
-                x.Write(WriteTagged(kv.Value));   // write offset to value written offline
+                x.Write(WriteInlineTagged(kv.Value));   // write offset to value written offline
         }
 
         return pos;
@@ -308,7 +403,7 @@ public class MemoWriter : IDisposable
 
     public MemoPtr WriteTagged(object[] vec)
     {
-        var pos = Align(sizeof(MemoPtr), 2 * sizeof(byte));
+        var pos = Align(sizeof(MemoPtr), 2 * sizeof(byte) + sizeof(MemoPtr));
 
         Write(MemoPack.TYPE_ARRAY);
         Write(MemoPack.TYPE_UNTYPED);
@@ -317,7 +412,7 @@ public class MemoWriter : IDisposable
         using (var x = BindWriter(vec.Length * sizeof(MemoPtr)))
         {
             foreach (var val in vec)
-                x.Write(WriteTagged(val));   // write offset to value written offline
+                x.Write(WriteInlineTagged(val));   // write offset to value written offline
         }
 
         return pos;
@@ -326,7 +421,7 @@ public class MemoWriter : IDisposable
 
     public MemoPtr WriteTagged(string[] vec)
     {
-        var pos = Align(sizeof(MemoPtr), 2 * sizeof(byte));
+        var pos = Align(sizeof(MemoPtr), 2 * sizeof(byte) + sizeof(MemoPtr));
 
         Write(MemoPack.TYPE_ARRAY);
         Write(MemoPack.TYPE_TXT_PTR);
@@ -343,7 +438,7 @@ public class MemoWriter : IDisposable
 
     public MemoPtr WriteTagged(double[] vec)
     {
-        var pos = Align(sizeof(double), 2 * sizeof(byte));
+        var pos = Align(sizeof(double), 2 * sizeof(byte) + sizeof(MemoPtr));
 
         Write(MemoPack.TYPE_ARRAY);
         Write(MemoPack.TYPE_F64);
@@ -354,7 +449,7 @@ public class MemoWriter : IDisposable
 
     public MemoPtr WriteTagged(long[] vec)
     {
-        var pos = Align(sizeof(long), 2 * sizeof(byte));
+        var pos = Align(sizeof(long), 2 * sizeof(byte) + sizeof(MemoPtr));
 
         Write(MemoPack.TYPE_ARRAY);
         Write(MemoPack.TYPE_I64);
@@ -365,7 +460,7 @@ public class MemoWriter : IDisposable
 
     public MemoPtr WriteTagged(int[] vec)
     {
-        var pos = Align(sizeof(int), 2 * sizeof(byte));
+        var pos = Align(sizeof(int), 2 * sizeof(byte) + sizeof(MemoPtr));
 
         Write(MemoPack.TYPE_ARRAY);
         Write(MemoPack.TYPE_I32);
@@ -376,7 +471,7 @@ public class MemoWriter : IDisposable
 
     public MemoPtr WriteTagged(bool[] vec)
     {
-        var pos = Align(sizeof(bool), 2 * sizeof(byte));
+        var pos = Align(sizeof(bool), 2 * sizeof(byte) + sizeof(MemoPtr));
 
         Write(MemoPack.TYPE_ARRAY);
         Write(MemoPack.TYPE_BOOL);

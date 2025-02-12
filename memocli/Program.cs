@@ -4,6 +4,8 @@ using Newtonsoft.Json;
 using Newtonsoft.Json.Converters;
 using System.CommandLine;
 using System.IO;
+using YamlDotNet.Serialization;
+using YamlDotNet.Serialization.NamingConventions;
 
 namespace MemoCLI
 {
@@ -36,7 +38,7 @@ namespace MemoCLI
             var fmtOpt = new Option<string>(
                 name: "--fmt",
                 description: "Output format (json, memopack). Implicit output path is same as input with new extension.");
-            fmtOpt.FromAmong("json", "mempack", "msgpack");
+            fmtOpt.FromAmong("json", "mempack", "msgpack" );  // !! JSON to YAML loses data !!
             fmtOpt.AddAlias("-f");
             // fmtOpt.Arity = ArgumentArity.OneOrMore;
             rootCmd.AddOption(fmtOpt);
@@ -53,45 +55,60 @@ namespace MemoCLI
             testOpt.AddAlias("-t");
             rootCmd.AddOption(testOpt);
 
-            rootCmd.SetHandler((inputPath, rw, outputPath, outputFormat, extra_pack, test) => {
-                Console.WriteLine("Hello memopack!");
-
-                object? data = null;
-                if (!string.IsNullOrEmpty(inputPath) && inputPath != "-") {
-                    if (inputPath.StartsWith("~"))
-                        inputPath = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
-                            + inputPath.Substring(1);
-
-                    Console.WriteLine($"Reading input file: {inputPath} ...");
-                    data = FromFile(inputPath);
-                }
-
-                // output path from input path and target extension
-                if (string.IsNullOrEmpty(outputPath)
-                    && !string.IsNullOrEmpty(outputFormat)
-                    && !string.IsNullOrEmpty(inputPath))
-                    outputPath = inputPath.Substring(0, inputPath.Length - Path.GetExtension(inputPath).Length) + "." + outputFormat;
-
-                if (!string.IsNullOrEmpty(outputPath) && data != null)
-                {
-                    Console.WriteLine($"Writing output file: {outputPath} ...");
-                    ToFile(outputPath, data, extra_pack);
-                }
-
-                if (test)
-                {
-                    Console.WriteLine($"Running self-test ...");
-                    if (data != null)
-                        CheckMemo(data, extra_pack);
-                    else
-                        Test();
-                }
+            rootCmd.SetHandler((string inputPath, string[] rw, string outputPath, string outputFormat, bool extra_pack, bool test) =>
+            {
+                RunCmd(inputPath, rw, outputPath, outputFormat, extra_pack, test);
 
                 Console.WriteLine($"Done.\n");
             }, inputArg, rwOpt, outOpt, fmtOpt, extraPackOpt, testOpt);
 
             var retVal = await rootCmd.InvokeAsync(args);
             return retVal;
+        }
+
+        static void RunCmd(string inputPath, string[] rw, string outputPath, string? outputFormat, bool extra_pack, bool test)
+        {
+            Console.WriteLine("Hello memopack!");
+
+            object? data = null;
+            if (!string.IsNullOrEmpty(inputPath) && inputPath != "-") {
+                if (inputPath.StartsWith("~"))
+                    inputPath = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
+                        + inputPath.Substring(1);
+
+                Console.WriteLine($"Reading input file: {inputPath} ...");
+                data = FromFile(inputPath);
+            }
+
+            // output path from input path and target extension
+            if (string.IsNullOrEmpty(outputPath)
+                && !string.IsNullOrEmpty(outputFormat)
+                && !string.IsNullOrEmpty(inputPath))
+                outputPath = inputPath.Substring(0, inputPath.Length - Path.GetExtension(inputPath).Length) + "." + outputFormat;
+
+            if (!string.IsNullOrEmpty(outputPath) && data != null)
+            {
+                Console.WriteLine($"Writing output file: {outputPath} ...");
+                ToFile(outputPath, data, extra_pack);
+            }
+
+            if (test && data != null)
+            {
+                Console.WriteLine($"Running self-test ...");
+
+                string ext = Path.GetExtension(inputPath);
+                string refPath = inputPath.Replace(ext,  ".ref"+ext);
+                string resPath = inputPath.Replace(ext,  ".res"+ext);
+                ToFile(refPath, data, extra_pack);
+                RunCmd(outputPath, rw, resPath, null, extra_pack, test: false);
+
+                // Compare original and new file
+                bool ok = CompareFiles(refPath, resPath);
+                if (!ok) throw new Exception("Serialisation is not bijective");
+            }
+
+            if (test && data == null)
+                Test();
         }
 
         const bool extra_pack_default = false;  // string internalisation only
@@ -123,11 +140,12 @@ namespace MemoCLI
             CheckMemo(123);
             CheckMemo(4.56);
             CheckMemo("abcd");
-            CheckMemo(new string[] { "abc", "def", "xyz" });
-            CheckMemo(new double[] { 1.23, 4.56 });
-            CheckMemo(new int[] { 123, 456, 789 });
-            CheckMemo(new bool[] { true, true, false });
-            CheckMemo(new bool[] { true, true, false, true, true, false, true, true, false, true, true, false, true, true, false, true, true, false, true, true, false, true, true, false,  });
+
+            CheckMemoAsJson(new string[] { "abc", "def", "xyz" });
+            CheckMemoAsJson(new double[] { 1.23, 4.56 });
+            CheckMemoAsJson(new int[] { 123, 456, 789 });
+            CheckMemoAsJson(new bool[] { true, true, false });
+            CheckMemoAsJson(new bool[] { true, true, false, true, true, false, true, true, false, true, true, false, true, true, false, true, true, false, true, true, false, true, true, false,  });
 
             CheckMemoOnJson("123");
             CheckMemoOnJson("4.56");
@@ -161,7 +179,7 @@ namespace MemoCLI
             CheckMemoCompress(json0, json1, extra_pack: false);
             }
 
-            CheckMemoOnJson(" { \"txt\": \"abc\", \"int\": 123, \"txt\": 4.56, \"flag0\": false, \"flag1\": true, \"lst\": [ 1, true, \"love\" ]} ");
+            CheckMemoOnJson(" { \"txt\": \"abc\", \"int\": 123, \"dbl\": 4.56, \"dbl2\": 321.0, \"flag0\": false, \"flag1\": true, \"lst\": [ 1, true, \"love\" ]} ");
         }
 
         static void TestPackFullJson(bool extra_pack)
@@ -196,6 +214,17 @@ namespace MemoCLI
             {
                 throw new Exception($"CheckMemo diff {res} <> {val} ");
             }
+        }
+
+        static void CheckMemoAsJson<T>(T? val, bool extra_pack = extra_pack_default)
+        {
+            byte[] bytes = ToMemo(val, extra_pack);
+            T? res = FromMemo<T>(bytes);
+
+            string refJson = ToJson(val);
+            string resJson = ToJson(res);
+            if (!refJson.Equals(resJson))
+                throw new Exception($"CheckMemo diff {resJson} <> {resJson} ");
         }
 
         static int CheckMemoOnJson(string dataJson, bool extra_pack = extra_pack_default)
@@ -331,6 +360,29 @@ namespace MemoCLI
             }
         }
 
+        static object? FromYamlFile(string inputPath)
+        {
+            var deserializer = new DeserializerBuilder()
+                .WithNamingConvention(UnderscoredNamingConvention.Instance)
+                .Build();
+            using (StreamReader tr = File.OpenText(inputPath))
+            {
+                var data = deserializer.Deserialize(tr);
+                return data;
+            }
+        }
+
+        static void ToYamlFile(string outputPath, object data)
+        {
+            var serializer = new SerializerBuilder()
+                .WithNamingConvention(CamelCaseNamingConvention.Instance)
+                .Build();
+            using (TextWriter tw =  File.CreateText(outputPath))
+            {
+                serializer.Serialize(tw, data);
+            }
+        }
+
         static object? FromFile(string inputPath)
         {
             var ext = Path.GetExtension(inputPath).ToLower();
@@ -340,6 +392,8 @@ namespace MemoCLI
                 return FromMemoFile<object>(inputPath);
             else if (ext == ".msgpack")
                 return FromMsgPackFile(inputPath);
+            else if (ext == ".yaml")
+                return FromYamlFile(inputPath);
             else
                 throw new NotSupportedException($"Unhandled exception {ext}");
         }
@@ -353,8 +407,33 @@ namespace MemoCLI
                 ToMemoFile(outputPath, data, extra_pack);
             else if (ext == ".msgpack")
                 ToMsgPackFile(outputPath, data);
-             else
+            else if (ext == ".yaml")
+                ToYamlFile(outputPath, data);
+            else
                 throw new NotSupportedException($"Unhandled exception {ext}");
+        }
+
+        static bool CompareFiles(string lhsPath, string rhsPath)
+        {
+            var lhsText = File.ReadAllLines(lhsPath);
+            var rhsText = File.ReadAllLines(rhsPath);
+
+            bool equal = lhsText.Length == rhsText.Length;
+            if (!equal)
+                Console.WriteLine($"  #lines differ {lhsText.Length} vs {rhsText.Length}");
+
+            int lineNumber = 1, lineDiffs = 0;
+            foreach (var line in lhsText.Zip(rhsText))
+            {
+                if (line.First != line.Second)
+                {
+                    Console.WriteLine($"  lines #{lineNumber} differ {line.First} vs {line.Second}");
+                    equal = false; lineDiffs++;
+                    if (lineDiffs > 10) { Console.WriteLine("..."); break; }
+                }
+                lineNumber++;
+            }
+            return equal;
         }
     }
 }
