@@ -191,6 +191,19 @@ public class MemoReader : IDisposable
         return res;
     }
 
+    public bool[] ReadBoolArray(uint nbBools)
+    {
+        Align(sizeof(byte));
+
+        int nbBytes = (int)( nbBools / 8 + ((nbBools % 8) == 0 ? 0 : 1) );
+
+        byte[] bytes = br.ReadBytes(nbBytes);
+        bool[] bools = MemoTools.ByteToBoolArray(bytes, nbBools);
+
+        top += nbBytes;
+        return bools;
+    }
+
 #endregion
 
 #region Decorated value
@@ -309,7 +322,7 @@ public class MemoReader : IDisposable
 
         if (typ == MemoPack.TYPE_UNTYPED)
             return ReadUInt32Array(n).Select(offset => ReadTaggedAt(offset)).ToArray();
-        if (typ == MemoPack.TYPE_TXT)
+        if (typ == MemoPack.TYPE_TXT_PTR)
             return ReadUInt32Array(n).Select(offset => ReadStringAt(offset)).ToArray();
         if (typ == MemoPack.TYPE_F64)
             return ReadDoubleArray(n);
@@ -317,6 +330,8 @@ public class MemoReader : IDisposable
             return ReadInt64Array(n);
         if (typ == MemoPack.TYPE_I32)
             return ReadInt32Array(n);
+        if (typ == MemoPack.TYPE_BOOL)
+            return ReadBoolArray(n);
 
         throw new Exception($"Unhandled array type {typ} / '{(char)typ}'");
     }

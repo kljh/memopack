@@ -153,10 +153,10 @@ public class MemoWriter : IDisposable
         Align(sizeof(bool), sizeof(MemoPtr));
 
         int n = vec.Length;
+        byte[] bytes = MemoTools.BoolToByteArray(vec);
         bw.Write((MemoPtr)n);
-        foreach (var val in vec)
-            bw.Write(val);
-        top += sizeof(MemoPtr) + n * sizeof(bool);
+        bw.Write(bytes);
+        top += sizeof(MemoPtr) + bytes.Length;
     }
 
     public MemoPtr Write(string val)
@@ -471,7 +471,8 @@ public class MemoWriter : IDisposable
 
     public MemoPtr WriteTagged(bool[] vec)
     {
-        var pos = Align(sizeof(bool), 2 * sizeof(byte) + sizeof(MemoPtr));
+        // for T[], we align of max(sizeof(MemoPtr), sizeof(T)) because we store the array size first
+        var pos = Align(sizeof(MemoPtr), 2 * sizeof(byte) + sizeof(MemoPtr));
 
         Write(MemoPack.TYPE_ARRAY);
         Write(MemoPack.TYPE_BOOL);
