@@ -3,9 +3,9 @@ namespace MemoPack
 
 public class MemoTools
 {
-    public static byte[] BoolToByteArray(bool[] bools)
+    public static byte[] BoolToByteArray(IEnumerable<bool> bools)
     {
-        int nbBytes = bools.Length / 8 + ((bools.Length % 8) == 0 ? 0 : 1);
+        int nbBytes = bools.Count() / 8 + ((bools.Count() % 8) == 0 ? 0 : 1);
         byte[] bytes = new byte[nbBytes];
 
         int iByte = 0;

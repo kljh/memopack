@@ -69,6 +69,11 @@ public class MemoScan : IDisposable
         */
     }
 
+    public void RunScan(object[] vec, AttributeStats stats)
+    {
+
+    }
+
     public void RunScanJObject(JObject jsonObj)
     {
         object_count++;
@@ -92,30 +97,19 @@ public class MemoScan : IDisposable
                     typeStats.Attributes[att] = new();
                 var attrStats = typeStats.Attributes[att];
 
-                attrStats.UseCount++;
-
-                var valType = val.GetType().Name;
-                if (!attrStats.UsedTypes.ContainsKey(valType))
-                    attrStats.UsedTypes[val.GetType().Name] = 0;
-                attrStats.UsedTypes[val.GetType().Name]++;
-
-                attrStats.MaxValue = Math.Max(
-                    attrStats.MaxValue,
-                    GetNumValue(val));
-
-                if (val is string)
-                {
-                    var valStr = (string)val;
-
-                    if (!attrStats.UsedValues.ContainsKey(valStr))
-                        attrStats.UsedValues[valStr] = 0;
-                    attrStats.UsedValues[valStr]++;
-
-                    attrStats.IsPtr = attrStats.IsPtr ||
-                        ( pointer_tags?.Contains(valStr) ?? false );
-                }
+                UpdateAttributeStats(val, attrStats);
             }
         }
+    }
+
+    private void RunScanJArray(JArray jsonArray)
+    {
+        object[]? vec = jsonArray.ToObject<object[]>();
+        if (vec == null)
+            throw new ArgumentNullException();
+
+        foreach (var val in vec)
+            RunScan(val);
     }
 
     private TypeStats? GetTypeStats(JObject jsonObj)
@@ -134,6 +128,57 @@ public class MemoScan : IDisposable
         return Types[type_name];
     }
 
+    public static void UpdateAttributeStats(IEnumerable<object> vec, AttributeStats attrStats)
+    {
+        foreach (var val in vec)
+        {
+            var valType = val.GetType().Name;
+            UpdateAttributeStats(val, attrStats);
+        }
+    }
+
+   static readonly HashSet<string> IntegerTypes = new() {
+        "Int64", "Int32", "Int16", "Int8",
+        "UInt64", "UInt32", "UInt16", "UInt8" };
+
+   static readonly HashSet<string> NumericTypes = new() {
+        "Double" };
+
+    public static void UpdateAttributeStats(object val, AttributeStats attrStats)
+    {
+        attrStats.UseCount++;
+
+        var valType = val.GetType().Name;
+        if (IntegerTypes.Contains(valType))
+            valType = "int";
+        else if (NumericTypes.Contains(valType))
+            valType = "double";
+        else if (valType == "String")
+            valType = "string";
+        else if (valType == "Boolean")
+            valType = "bool";
+
+        if (!attrStats.UsedTypes.ContainsKey(valType))
+            attrStats.UsedTypes[valType] = 0;
+        attrStats.UsedTypes[valType]++;
+
+        attrStats.MaxValue = Math.Max(
+            attrStats.MaxValue,
+            GetNumValue(val));
+
+        if (val is string)
+        {
+            var valStr = (string)val;
+
+            if (!attrStats.UsedValues.ContainsKey(valStr))
+                attrStats.UsedValues[valStr] = 0;
+            attrStats.UsedValues[valStr]++;
+
+            // attrStats.IsPtr = attrStats.IsPtr ||
+            //     ( pointer_tags?.Contains(valStr) ?? false );
+        }
+    }
+
     static private double GetNumValue(object val)
     {
         if (val is string)
@@ -149,16 +194,6 @@ public class MemoScan : IDisposable
         if (val is uint)
             return (uint)val;
         return 0.0;
-    }
-
-    private void RunScanJArray(JArray jsonArray)
-    {
-        object[]? vec = jsonArray.ToObject<object[]>();
-        if (vec == null)
-            throw new ArgumentNullException();
-
-        foreach (var val in vec)
-            RunScan(val);
     }
 
     public void DisplayScan()

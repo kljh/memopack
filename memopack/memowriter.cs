@@ -104,55 +104,55 @@ public class MemoWriter : IDisposable
 
 #region Raw Value
 
-    public void Write(double[] vec)
+    public void Write(IEnumerable<double> vec)
     {
         Align(sizeof(double), sizeof(MemoPtr));
 
-        int n = vec.Length;
+        int n = vec.Count();
         bw.Write((MemoPtr)n);
         foreach (var val in vec)
             bw.Write(val);
         top += sizeof(MemoPtr) + n * sizeof(double);
     }
 
-    public void Write(float[] vec)
+    public void Write(IEnumerable<float> vec)
     {
         Align(sizeof(float), sizeof(MemoPtr));
 
-        int n = vec.Length;
+        int n = vec.Count();
         bw.Write((MemoPtr)n);
         foreach (var val in vec)
             bw.Write(val);
         top += sizeof(MemoPtr) + n * sizeof(float);
     }
 
-    public void Write(long[] vec)
+    public void Write(IEnumerable<long> vec)
     {
         Align(sizeof(long), sizeof(MemoPtr));
 
-        int n = vec.Length;
+        int n = vec.Count();
         bw.Write((MemoPtr)n);
         foreach (var val in vec)
             bw.Write(val);
         top += sizeof(MemoPtr) + n * sizeof(long);
     }
 
-    public void Write(int[] vec)
+    public void Write(IEnumerable<int> vec)
     {
         Align(sizeof(int), sizeof(MemoPtr));
 
-        int n = vec.Length;
+        int n = vec.Count();
         bw.Write((MemoPtr)n);
         foreach (var val in vec)
             bw.Write(val);
         top += sizeof(MemoPtr) + n * sizeof(int);
     }
 
-    public void Write(bool[] vec)
+    public void Write(IEnumerable<bool> vec)
     {
         Align(sizeof(bool), sizeof(MemoPtr));
 
-        int n = vec.Length;
+        int n = vec.Count();
         byte[] bytes = MemoTools.BoolToByteArray(vec);
         bw.Write((MemoPtr)n);
         bw.Write(bytes);
@@ -329,16 +329,16 @@ public class MemoWriter : IDisposable
         if (val is bool)
             return WriteTagged((bool)val);
 
-        if (val is string[])
-            return WriteTagged((string[])val);
-        if (val is double[])
-            return WriteTagged((double[])val);
-        if (val is long[])
-            return WriteTagged((long[])val);
-        if (val is int[])
-            return WriteTagged((int[])val);
-        if (val is bool[])
-            return WriteTagged((bool[])val);
+        if (val is IEnumerable<string>)
+            return WriteTagged((IEnumerable<string>)val);
+        if (val is IEnumerable<double>)
+            return WriteTagged((IEnumerable<double>)val);
+        if (val is IEnumerable<long>)
+            return WriteTagged((IEnumerable<long>)val);
+        if (val is IEnumerable<int>)
+            return WriteTagged((IEnumerable<int>)val);
+        if (val is IEnumerable<bool>)
+            return WriteTagged((IEnumerable<bool>)val);
 
         if (val is Dictionary<string, object>) {
             var dic = (Dictionary<string, object>)val;
@@ -388,7 +388,7 @@ public class MemoWriter : IDisposable
         Write(MemoPack.TYPE_DICT);
         Write(MemoPack.TYPE_TXT);
         Write(MemoPack.TYPE_UNTYPED);
-        Write((MemoPtr)dict.Count);
+        Write((MemoPtr)dict.Count());
 
         using (var x = BindWriter(2 * n * sizeof(MemoPtr)))
         {
@@ -401,15 +401,56 @@ public class MemoWriter : IDisposable
         return pos;
     }
 
-    public MemoPtr WriteTagged(object[] vec)
+    public MemoPtr TryWriteTaggedHomogeneous(IEnumerable<object> vec)
     {
+        MemoScan.AttributeStats attrStats = new();
+        MemoScan.UpdateAttributeStats(vec, attrStats);
+        if (attrStats.UsedTypes.Count == 1)
+        {
+            string array_type = attrStats.UsedTypes.Single().Key;
+            if (array_type == "string")
+                return WriteTagged(vec.Select(x => (string)x));
+            else if (array_type == "double")
+                return WriteTagged(vec.Select(x => (double)x));
+            else if (array_type == "int") {
+                if (attrStats.MaxValue < Math.Pow(2, 31))
+                    return WriteTagged(vec.Select(x => Convert.ToInt32(x)));
+                else
+                    return WriteTagged(vec.Select(x => Convert.ToInt64(x)));
+            }
+            else if (array_type == "bool")
+                return WriteTagged(vec.Select(x => (bool)x));
+            else if (array_type != "object")
+                throw new Exception("Unhandled homogeneous type");
+        }
+
+        /*
+        // double and int
+        if (attrStats.UsedTypes.Count == 2
+            && attrStats.UsedTypes.ContainsKey("double")
+            && attrStats.UsedTypes.ContainsKey("int"))
+        {
+            return WriteTagged(vec.Select(x => Convert.ToDouble(x)));
+        }
+        */
+
+        return 0;
+    }
+
+    public MemoPtr WriteTagged(IEnumerable<object> vec)
+    {
+        // check whether this is an homogeneous array
+        MemoPtr homegeneous = TryWriteTaggedHomogeneous(vec);
+        if (homegeneous != 0)
+            return homegeneous;
+
         var pos = Align(sizeof(MemoPtr), 2 * sizeof(byte) + sizeof(MemoPtr));
 
         Write(MemoPack.TYPE_ARRAY);
         Write(MemoPack.TYPE_UNTYPED);
-        Write((MemoPtr)vec.Length);
+        Write((MemoPtr)vec.Count());
 
-        using (var x = BindWriter(vec.Length * sizeof(MemoPtr)))
+        using (var x = BindWriter(vec.Count() * sizeof(MemoPtr)))
         {
             foreach (var val in vec)
                 x.Write(WriteInlineTagged(val));   // write offset to value written offline
@@ -419,24 +460,24 @@ public class MemoWriter : IDisposable
     }
 
 
-    public MemoPtr WriteTagged(string[] vec)
+    public MemoPtr WriteTagged(IEnumerable<string> vec)
     {
         var pos = Align(sizeof(MemoPtr), 2 * sizeof(byte) + sizeof(MemoPtr));
 
         Write(MemoPack.TYPE_ARRAY);
         Write(MemoPack.TYPE_TXT_PTR);
-        Write((MemoPtr)vec.Length);
+        Write((MemoPtr)vec.Count());
 
-        using (var x = BindWriter(vec.Length * sizeof(MemoPtr)))
+        using (var x = BindWriter(vec.Count() * sizeof(MemoPtr)))
         {
             foreach (var val in vec)
-                x.Write(WriteTagged(val));   // write offset to value written offline
+                x.Write(Write(val));   // write offset to value written offline
         }
 
         return pos;
     }
 
-    public MemoPtr WriteTagged(double[] vec)
+    public MemoPtr WriteTagged(IEnumerable<double> vec)
     {
         var pos = Align(sizeof(double), 2 * sizeof(byte) + sizeof(MemoPtr));
 
@@ -447,7 +488,7 @@ public class MemoWriter : IDisposable
         return pos;
     }
 
-    public MemoPtr WriteTagged(long[] vec)
+    public MemoPtr WriteTagged(IEnumerable<long> vec)
     {
         var pos = Align(sizeof(long), 2 * sizeof(byte) + sizeof(MemoPtr));
 
@@ -458,7 +499,7 @@ public class MemoWriter : IDisposable
         return pos;
     }
 
-    public MemoPtr WriteTagged(int[] vec)
+    public MemoPtr WriteTagged(IEnumerable<int> vec)
     {
         var pos = Align(sizeof(int), 2 * sizeof(byte) + sizeof(MemoPtr));
 
@@ -469,7 +510,7 @@ public class MemoWriter : IDisposable
         return pos;
     }
 
-    public MemoPtr WriteTagged(bool[] vec)
+    public MemoPtr WriteTagged(IEnumerable<bool> vec)
     {
         // for T[], we align of max(sizeof(MemoPtr), sizeof(T)) because we store the array size first
         var pos = Align(sizeof(MemoPtr), 2 * sizeof(byte) + sizeof(MemoPtr));
